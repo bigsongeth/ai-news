@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Stable bun launcher: use npx bun (auto-install) without relying on interactive shell profile.
+exec npx -y bun "$@"
