@@ -2,15 +2,16 @@
 set -euo pipefail
 
 # Usage:
-#   ./scripts/run_openclaw_pipeline.sh --hours 24 --topN 15 --shortlistMax 48 --chunkSize 8
+#   ./scripts/run_openclaw_pipeline.sh --hours 24 --topN 15 --shortlistMax 48 --chunkSize 8 [--parallel 3]
 #
 # Requires:
-#   - OPENAI_API_KEY (and optionally OPENAI_API_BASE/OPENAI_MODEL)
+#   - OPENAI_API_KEY (optional if SongKey fallback is available in OpenClaw config)
 
 HOURS=24
 TOPN=15
 SHORTLIST=48
 CHUNK=8
+PARALLEL=3
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -18,6 +19,7 @@ while [[ $# -gt 0 ]]; do
     --topN) TOPN="$2"; shift 2;;
     --shortlistMax) SHORTLIST="$2"; shift 2;;
     --chunkSize) CHUNK="$2"; shift 2;;
+    --parallel) PARALLEL="$2"; shift 2;;
     *) echo "Unknown arg: $1"; exit 1;;
   esac
 done
@@ -34,11 +36,25 @@ npx -y bun scripts/openclaw_fetch.ts --hours "$HOURS" --output "./output/candida
 PLAN_PATH=$(npx -y bun scripts/openclaw_plan.ts --input ./output/candidates.json --hours "$HOURS" --outDir ./output --runId "$RUN_ID" --shortlistMax "$SHORTLIST" --chunkSize "$CHUNK")
 RUN_DIR="./output/$RUN_ID"
 
-# 3) enrich sequentially (this is for local debug; cron will use sub-agents in parallel)
-for f in "$RUN_DIR"/chunk-*.input.json; do
-  out="${f/.input.json/.enriched.json}"
+# 3) enrich in parallel by chunk
+CHUNK_FILES=$(find "$RUN_DIR" -maxdepth 1 -name 'chunk-*.input.json' | sort)
+
+if [[ -z "$CHUNK_FILES" ]]; then
+  echo "No chunk input files found in $RUN_DIR" >&2
+  exit 1
+fi
+
+run_chunk() {
+  local f="$1"
+  local out="${f/.input.json/.enriched.json}"
+  echo "[enrich] start $(basename "$f")" >&2
   npx -y bun scripts/openclaw_enrich_chunk.ts --input "$f" --output "$out"
-done
+  echo "[enrich] done  $(basename "$out")" >&2
+}
+
+export -f run_chunk
+
+printf '%s\n' "$CHUNK_FILES" | xargs -I{} -P "$PARALLEL" bash -lc 'run_chunk "$1"' _ {}
 
 # 4) render
 npx -y bun scripts/openclaw_render.ts --runDir "$RUN_DIR" --plan "$PLAN_PATH" --topN "$TOPN" > "$RUN_DIR/digest.md"
