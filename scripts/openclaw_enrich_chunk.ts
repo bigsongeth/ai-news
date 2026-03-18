@@ -39,7 +39,7 @@ type Enriched = InArticle & {
   };
   extracted: {
     title?: string;
-    text: string; // truncated
+    text: string;
   };
   llm: {
     score: number;
@@ -61,6 +61,14 @@ type Out = {
   enriched: Enriched[];
 };
 
+type ProviderConfig = {
+  baseUrl?: string;
+  apiKey?: string;
+};
+
+const DEFAULT_MODEL = 'gpt-5.4';
+const OPENCLAW_CONFIG_PATH = '/Users/bigsong/.openclaw/openclaw.json';
+
 function parseArgs(argv: string[]) {
   const args: Record<string, string> = {};
   for (let i = 2; i < argv.length; i++) {
@@ -74,16 +82,39 @@ function parseArgs(argv: string[]) {
   return args;
 }
 
-function mustEnv(name: string) {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env ${name}`);
-  return v;
+async function resolveOpenAIConfig(): Promise<{ apiKey: string; base: string; model: string }> {
+  const envApiKey = process.env.OPENAI_API_KEY;
+  const envBase = process.env.OPENAI_API_BASE;
+  const envModel = process.env.OPENAI_MODEL;
+
+  if (envApiKey) {
+    return {
+      apiKey: envApiKey,
+      base: (envBase || 'https://api.openai.com/v1').replace(/\/$/, ''),
+      model: envModel || DEFAULT_MODEL,
+    };
+  }
+
+  try {
+    const raw = await readFile(OPENCLAW_CONFIG_PATH, 'utf8');
+    const cfg = JSON.parse(raw);
+    const provider: ProviderConfig | undefined = cfg?.models?.providers?.SongKey;
+    if (provider?.apiKey && provider?.baseUrl) {
+      return {
+        apiKey: provider.apiKey,
+        base: provider.baseUrl.replace(/\/$/, ''),
+        model: envModel || DEFAULT_MODEL,
+      };
+    }
+  } catch {
+    // ignore and fall through
+  }
+
+  throw new Error('Missing OPENAI_API_KEY and unable to resolve SongKey provider from OpenClaw config');
 }
 
 async function callOpenAI(prompt: string): Promise<{ content: string; model: string }> {
-  const apiKey = mustEnv('OPENAI_API_KEY');
-  const base = (process.env.OPENAI_API_BASE || 'https://api.openai.com/v1').replace(/\/$/, '');
-  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const { apiKey, base, model } = await resolveOpenAIConfig();
 
   const url = `${base}/chat/completions`;
   const body = {
@@ -144,7 +175,6 @@ async function fetchPageText(url: string, timeoutMs: number): Promise<{ ok: bool
     if (!res.ok) {
       return { ok: false, status, finalUrl, text: '', error: `HTTP ${status}` };
     }
-    // Only attempt text/html
     if (!ct.includes('text/html') && !ct.includes('application/xhtml+xml')) {
       const buf = await res.arrayBuffer();
       return { ok: false, status, finalUrl, text: '', bytes: buf.byteLength, error: `Unsupported content-type: ${ct}` };
@@ -152,7 +182,6 @@ async function fetchPageText(url: string, timeoutMs: number): Promise<{ ok: bool
     const html = await res.text();
     const bytes = Buffer.byteLength(html, 'utf8');
 
-    // naive extraction: strip scripts/styles + tags
     const cleaned = html
       .replace(/<script[\s\S]*?<\/script>/gi, ' ')
       .replace(/<style[\s\S]*?<\/style>/gi, ' ')
@@ -189,34 +218,13 @@ function buildPrompt(a: InArticle, pageText: string, pageTitle?: string) {
     pageText: truncateText(pageText, 8000),
   };
 
-  return `你是「AI Daily Digest」的编辑助理。请对单篇文章做评分、分类、中文标题与摘要。
-
-` +
-`硬规则：
-` +
-`- 只允许基于给定输入（title/desc/pageText/source/time）；不要编造文章里不存在的细节。
-` +
-`- 如果 pageText 信息不足，摘要必须用保守措辞（可能/主要讨论/预计涉及），并降低 confidence。
-` +
-`- 输出必须是严格 JSON（不要 markdown，不要解释）。
-
-` +
-`输出结构：
-` +
-`{
-  "score": number, // 1-10 可含 1 位小数
-  "dims": {"relevance": int1-10, "quality": int1-10, "timeliness": int1-10},
-  "category": "AI/ML"|"安全"|"工程"|"工具/开源"|"观点/杂谈"|"其他",
-  "keywords": string[], // 3-8
-  "titleZh": string,
-  "summaryZh": string, // 4-6 句
-  "why": string, // 1 句
-  "confidence": "high"|"medium"|"low"
-}
-
-输入：
-${JSON.stringify(input)}
-`;
+  return `你是「AI Daily Digest」的编辑助理。请对单篇文章做评分、分类、中文标题与摘要。\n\n` +
+`硬规则：\n` +
+`- 只允许基于给定输入（title/desc/pageText/source/time）；不要编造文章里不存在的细节。\n` +
+`- 如果 pageText 信息不足，摘要必须用保守措辞（可能/主要讨论/预计涉及），并降低 confidence。\n` +
+`- 输出必须是严格 JSON（不要 markdown，不要解释）。\n\n` +
+`输出结构：\n` +
+`{\n  "score": number, // 1-10 可含 1 位小数\n  "dims": {"relevance": int1-10, "quality": int1-10, "timeliness": int1-10},\n  "category": "AI/ML"|"安全"|"工程"|"工具/开源"|"观点/杂谈"|"其他",\n  "keywords": string[], // 3-8\n  "titleZh": string,\n  "summaryZh": string, // 4-6 句\n  "why": string, // 1 句\n  "confidence": "high"|"medium"|"low"\n}\n\n输入：\n${JSON.stringify(input)}\n`;
 }
 
 async function main() {
@@ -238,7 +246,7 @@ async function main() {
   const chunk = JSON.parse(raw) as ChunkInput;
 
   const enriched: Enriched[] = [];
-  let modelUsed = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  let modelUsed = process.env.OPENAI_MODEL || DEFAULT_MODEL;
 
   for (const a of chunk.articles || []) {
     const fetched = await fetchPageText(a.link, fetchTimeoutMs);
@@ -277,7 +285,6 @@ async function main() {
         }
       });
     } catch (e: any) {
-      // If LLM fails for one item, keep a stub so aggregator can proceed.
       enriched.push({
         ...a,
         fetched: {

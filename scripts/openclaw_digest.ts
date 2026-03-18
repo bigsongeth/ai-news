@@ -10,7 +10,7 @@
  * Behavior:
  *  - Uses OpenAI-compatible env vars if present (OPENAI_API_KEY / OPENAI_API_BASE / OPENAI_MODEL)
  *    to call an LLM for scoring + summarization.
- *  - If no API key, prints a clear error (cron job can surface it).
+ *  - If no env is present, falls back to SongKey provider config from OpenClaw.
  *
  * Output:
  *  - Prints Markdown optimized for Feishu (headings + lists) to stdout.
@@ -49,11 +49,19 @@ type Picked = InArticle & {
 };
 
 type LLMResult = {
-  highlights: string[]; // 3-5
-  picked: Picked[]; // top N
+  highlights: string[];
+  picked: Picked[];
   categoryStats: Record<string, number>;
   keywordTop: Array<{ k: string; n: number }>;
 };
+
+type ProviderConfig = {
+  baseUrl?: string;
+  apiKey?: string;
+};
+
+const DEFAULT_MODEL = 'gpt-5.4';
+const OPENCLAW_CONFIG_PATH = '/Users/bigsong/.openclaw/openclaw.json';
 
 function parseArgs(argv: string[]) {
   const args: Record<string, string> = {};
@@ -68,16 +76,39 @@ function parseArgs(argv: string[]) {
   return args;
 }
 
-function mustEnv(name: string) {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env ${name}`);
-  return v;
+async function resolveOpenAIConfig(): Promise<{ apiKey: string; base: string; model: string }> {
+  const envApiKey = process.env.OPENAI_API_KEY;
+  const envBase = process.env.OPENAI_API_BASE;
+  const envModel = process.env.OPENAI_MODEL;
+
+  if (envApiKey) {
+    return {
+      apiKey: envApiKey,
+      base: (envBase || 'https://api.openai.com/v1').replace(/\/$/, ''),
+      model: envModel || DEFAULT_MODEL,
+    };
+  }
+
+  try {
+    const raw = await readFile(OPENCLAW_CONFIG_PATH, 'utf8');
+    const cfg = JSON.parse(raw);
+    const provider: ProviderConfig | undefined = cfg?.models?.providers?.SongKey;
+    if (provider?.apiKey && provider?.baseUrl) {
+      return {
+        apiKey: provider.apiKey,
+        base: provider.baseUrl.replace(/\/$/, ''),
+        model: envModel || DEFAULT_MODEL,
+      };
+    }
+  } catch {
+    // ignore and fall through
+  }
+
+  throw new Error('Missing OPENAI_API_KEY and unable to resolve SongKey provider from OpenClaw config');
 }
 
 async function callOpenAI(prompt: string): Promise<string> {
-  const apiKey = mustEnv('OPENAI_API_KEY');
-  const base = (process.env.OPENAI_API_BASE || 'https://api.openai.com/v1').replace(/\/$/, '');
-  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const { apiKey, base, model } = await resolveOpenAIConfig();
 
   const url = `${base}/chat/completions`;
   const body = {
@@ -110,9 +141,7 @@ async function callOpenAI(prompt: string): Promise<string> {
 }
 
 function safeJsonParse(text: string): any {
-  // Try direct JSON
   try { return JSON.parse(text); } catch {}
-  // Try fenced block
   const m = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (m?.[1]) return JSON.parse(m[1]);
   throw new Error('Failed to parse JSON from LLM output');
@@ -155,7 +184,6 @@ function renderFeishuMarkdown(r: LLMResult, hours: number, generatedAt: string, 
 }
 
 function buildPrompt(articles: InArticle[], topN: number, hours: number) {
-  // Provide compact input; encourage use of description as weak signal.
   const compact = articles.map((a, idx) => ({
     i: idx,
     title: a.title,
@@ -190,19 +218,12 @@ async function main() {
 
   const raw = await readFile(input, 'utf8');
   const data = JSON.parse(raw) as InJson;
-
   const hours = Number(args.hours ?? String(data.hours ?? 24));
-
-  if (!process.env.OPENAI_API_KEY) {
-    console.error('缺少 OPENAI_API_KEY：当前改造版本不再使用 Gemini/外部自定义模型；请在运行环境中配置 OPENAI_API_KEY（可配 OPENAI_API_BASE/OPENAI_MODEL）。');
-    process.exit(2);
-  }
 
   const prompt = buildPrompt(data.articles, topN, hours);
   const text = await callOpenAI(prompt);
   const parsed = safeJsonParse(text);
 
-  // Map picked indices back to source
   const picked: Picked[] = (parsed.picked || []).map((p: any) => {
     const src = data.articles[p.index];
     return {
@@ -221,15 +242,11 @@ async function main() {
     };
   });
 
-  const categoryStats: Record<string, number> = parsed.categoryStats || {};
-  const keywordTop: Array<{ k: string; n: number }> = parsed.keywordTop || [];
-  const highlights: string[] = parsed.highlights || [];
-
   const out: LLMResult = {
-    highlights,
+    highlights: parsed.highlights || [],
     picked: picked.slice(0, topN),
-    categoryStats,
-    keywordTop,
+    categoryStats: parsed.categoryStats || {},
+    keywordTop: parsed.keywordTop || [],
   };
 
   const md = renderFeishuMarkdown(out, hours, data.generatedAt, data.totalFeeds, data.okFeeds, data.totalArticles);
