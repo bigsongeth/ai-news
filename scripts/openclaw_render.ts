@@ -70,11 +70,11 @@ function fmtBeijing(iso: string) {
 function render(plan: Plan, picked: Enriched[], highlights: string[], categoryStats: Record<string, number>, keywordTop: Array<{ k: string; n: number }>) {
   const failList = (plan.failedFeeds || []).slice(0, 8).map(f => f.name).join('、');
   const failLine = (plan.failedFeeds?.length)
-    ? `\n> 失败源（${plan.failedFeeds.length}）：${failList}${plan.failedFeeds.length > 8 ? '…' : ''}`
+    ? `｜失败源（${plan.failedFeeds.length}）：${failList}${plan.failedFeeds.length > 8 ? '…' : ''}`
     : '';
 
-  const header = `# 🦞 AI Daily Digest｜过去${plan.hours}小时（Top ${picked.length}）\n\n` +
-    `> 生成时间：${fmtBeijing(new Date().toISOString())}｜抓取源：${plan.okFeeds}/${plan.totalFeeds}｜候选：${plan.totalCandidates}｜短名单：${plan.shortlistSize}` +
+  const header = `# 🦞 AI 每日日报｜过去${plan.hours}小时（Top ${picked.length}）\n\n` +
+    `生成时间：${fmtBeijing(new Date().toISOString())}｜抓取源：${plan.okFeeds}/${plan.totalFeeds}｜候选：${plan.totalCandidates}｜短名单：${plan.shortlistSize}` +
     `${failLine}\n\n`;
 
   const highlightsBlock = `## 📝 今日看点（3-5条）\n\n` + (highlights.length ? highlights.map(h => `- ${h}`).join('\n') : '- （暂无）') + '\n\n';
@@ -172,3 +172,4 @@ main().catch((e) => {
   console.error(e);
   process.exit(1);
 });
+
