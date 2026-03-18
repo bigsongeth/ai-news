@@ -69,6 +69,41 @@ function fmtBeijing(iso: string) {
   return `${y}-${m}-${day} ${hh}:${mm}`;
 }
 
+function hasCJK(s?: string) {
+  return /[\u3400-\u9fff]/.test(s || '');
+}
+
+function localizeTitle(titleZh: string | undefined, title: string) {
+  const candidate = (titleZh || '').trim();
+  if (candidate && hasCJK(candidate)) return candidate;
+
+  const t = (candidate || title || '').trim();
+  const exact: Record<string, string> = {
+    'Subagents': '子代理（Subagents）',
+    'Why Are We Still Doing This?': '我们为什么还在这样做？',
+    'Your Startup Is Probably Dead On Arrival': '你的创业公司可能一开始就已经注定失败',
+    'Wander the Small Web': '漫游小型网络',
+    'You Might Debate It — If You Could See It': '你也许可以争论它——前提是你看得见它',
+    'Marc Andreessen is wrong about introspection': 'Marc Andreessen 对“内省”的看法错了',
+    'Tighter bounds on alternating series remainder': '交错级数余项的更紧误差界',
+    '★ Squashing': '“辟谣式标题”并不等于真正澄清',
+    'Quoting Ken Jin': '引用 Ken Jin',
+    'Quoting Tim Schilling': '引用 Tim Schilling',
+    'Pluralistic: William Gibson vs Margaret Thatcher (17 Mar 2026)': 'Pluralistic：威廉·吉布森 vs 玛格丽特·撒切尔',
+    'Windows stack limit checking retrospective: x86-32 also known as i386, second try': 'Windows 栈限制检查回顾：x86-32（i386）再探',
+    'Fox Sports to Broadcast U.S.-Venezuela World Baseball Classic Final in Immersive 3D — But Not on Vision Pro': 'Fox Sports 将以沉浸式 3D 转播美委 WBC 决赛，但不支持 Vision Pro',
+    'GPT-5.4 mini and GPT-5.4 nano, which can describe 76,000 photos for $52': 'GPT-5.4 mini 与 nano：约 52 美元可描述 7.6 万张照片',
+  };
+  if (exact[t]) return exact[t];
+
+  let m = t.match(/^Quoting\s+(.+)$/i);
+  if (m) return `引用 ${m[1]}`;
+  m = t.match(/^(.+?)\s+vs\s+(.+)$/i);
+  if (m) return `${m[1]} vs ${m[2]}`;
+
+  return `《${t}》`;
+}
+
 function computeStats(items: EditedItem[]) {
   const categoryStats: Record<string, number> = {};
   const kwCount: Record<string, number> = {};
@@ -172,7 +207,7 @@ async function main() {
   for (const a of picked) {
     const meta = `${a.sourceName}｜${fmtBeijing(a.publishedAt)}｜${a.category}｜${a.score.toFixed(1)}（相关${a.dims.relevance}/质量${a.dims.quality}/时效${a.dims.timeliness}）`;
     const kws = (a.keywords || []).slice(0, 8).map(k => `\`${k}\``).join(' ');
-    md += `### [${a.titleZh || a.title}](${a.link})\n`;
+    md += `### [${localizeTitle(a.titleZh, a.title)}](${a.link})\n`;
     md += `> ${a.summaryZh || '（摘要缺失）'}\n`;
     md += `${meta}\n`;
     if (a.why) md += `推荐理由：${a.why}\n`;
