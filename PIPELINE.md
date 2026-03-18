@@ -38,6 +38,7 @@ For each run id (`output/<runId>/`), the pipeline should aim to create:
 - Purpose: fetch article bodies reliably
 - Main guidance: follow `content-extract` decision tree conceptually (`web_fetch` probe first, then heavier fallback when needed)
 - Output: `chunk-<n>.extracted.json`
+- Hard rule: do not silently skip extraction. Every item must record attempts, failure stage, failure reason, and content length.
 
 ### 4) Editor
 - Purpose: produce digest-ready article cards
@@ -115,10 +116,35 @@ For each run id (`output/<runId>/`), the pipeline should aim to create:
         "engine": "web_fetch",
         "sources": ["https://..."],
         "notes": [],
+        "attempts": [
+          {"engine": "web_fetch", "ok": true, "content_chars": 4200}
+        ],
+        "failure_stage": null,
+        "failure_reason": null,
+        "content_chars": 4200,
         "markdown": "..."
       }
     }
   ]
+}
+```
+
+Failure example:
+
+```json
+{
+  "ok": false,
+  "engine": "browser",
+  "sources": ["https://..."],
+  "notes": ["browser navigation timed out"],
+  "attempts": [
+    {"engine": "web_fetch", "ok": false, "failure_reason": "too_short", "content_chars": 84},
+    {"engine": "browser", "ok": false, "failure_reason": "timeout", "content_chars": 0}
+  ],
+  "failure_stage": "browser",
+  "failure_reason": "timeout",
+  "content_chars": 0,
+  "markdown": ""
 }
 ```
 
@@ -144,7 +170,11 @@ For each run id (`output/<runId>/`), the pipeline should aim to create:
       "summaryZh": "...",
       "why": "...",
       "confidence": "medium",
-      "sources": ["https://..."]
+      "sources": ["https://..."],
+      "extractionOk": true,
+      "extractionEngine": "web_fetch",
+      "extractionFailureReason": null,
+      "contentChars": 4200
     }
   ]
 }
@@ -157,3 +187,4 @@ For each run id (`output/<runId>/`), the pipeline should aim to create:
 - Main agent is responsible for the only user-visible / Feishu-visible final digest.
 - If extraction fails, keep the article with conservative wording and lower confidence.
 - If verification fails, keep the candidate source but mark confidence accordingly.
+- Extractor is not allowed to emit `engine: "none"` without also including non-empty `attempts`, `failure_stage`, and `failure_reason`.

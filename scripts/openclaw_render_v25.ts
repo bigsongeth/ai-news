@@ -24,6 +24,10 @@ type EditedItem = {
   why: string;
   confidence: 'high' | 'medium' | 'low';
   sources?: string[];
+  extractionOk?: boolean;
+  extractionEngine?: string | null;
+  extractionFailureReason?: string | null;
+  contentChars?: number;
 };
 
 type Plan = {
@@ -93,6 +97,26 @@ function buildHighlights(items: EditedItem[], signals?: Signals) {
   if (lowConf) out.push(`其中有 ${lowConf} 篇为低置信摘要，已使用保守措辞处理。`);
   const officialCount = items.filter(x => x.canonicalSourceUrl).length;
   if (officialCount) out.push(`有 ${officialCount} 篇条目补到了更原始或更官方的来源。`);
+
+  const extractedOk = items.filter(x => x.extractionOk === true).length;
+  const extractedFail = items.filter(x => x.extractionOk === false).length;
+  if (extractedOk || extractedFail) {
+    out.push(`正文提取结果：成功 ${extractedOk} 篇，失败 ${extractedFail} 篇。`);
+  }
+
+  const topFailureReasons = Array.from(
+    items.reduce((m, x) => {
+      const k = x.extractionFailureReason || '';
+      if (!k) return m;
+      m.set(k, (m.get(k) || 0) + 1);
+      return m;
+    }, new Map<string, number>())
+  ).sort((a, b) => b[1] - a[1]).slice(0, 2);
+
+  if (topFailureReasons.length) {
+    out.push(`主要提取失败原因：${topFailureReasons.map(([k, n]) => `${k}（${n}）`).join('、')}。`);
+  }
+
   if (signals?.missing_candidates?.length) {
     out.push(`搜索补漏发现 ${signals.missing_candidates.length} 条潜在重要候选，但未全部纳入最终 Top 榜单。`);
   }
@@ -153,6 +177,9 @@ async function main() {
     md += `${meta}\n`;
     if (a.why) md += `推荐理由：${a.why}\n`;
     if (a.canonicalSourceUrl) md += `原始/更权威来源：${a.canonicalSourceUrl}\n`;
+    if (a.extractionOk === false && a.extractionFailureReason) {
+      md += `正文提取失败：${a.extractionFailureReason}${typeof a.contentChars === 'number' ? `｜提取字符数：${a.contentChars}` : ''}\n`;
+    }
     if (kws) md += `关键词：${kws}\n`;
     md += `\n`;
   }
