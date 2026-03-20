@@ -85,6 +85,7 @@ function render(plan: Plan, picked: Enriched[], highlights: string[], categorySt
     return [
       `### [${a.llm.titleZh || a.title}](${a.link})`,
       `> ${a.llm.summaryZh || '（摘要缺失）'}`,
+      '',
       `${meta}`,
       a.llm.why ? `推荐理由：${a.llm.why}` : '',
       kws ? `关键词：${kws}` : '',

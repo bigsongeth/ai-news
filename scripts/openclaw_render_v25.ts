@@ -208,7 +208,7 @@ async function main() {
     const meta = `${a.sourceName}｜${fmtBeijing(a.publishedAt)}｜${a.category}｜${a.score.toFixed(1)}（相关${a.dims.relevance}/质量${a.dims.quality}/时效${a.dims.timeliness}）`;
     const kws = (a.keywords || []).slice(0, 8).map(k => `\`${k}\``).join(' ');
     md += `### [${localizeTitle(a.titleZh, a.title)}](${a.link})\n`;
-    md += `> ${a.summaryZh || '（摘要缺失）'}\n`;
+    md += `> ${a.summaryZh || '（摘要缺失）'}\n\n`;
     md += `${meta}\n`;
     if (a.why) md += `推荐理由：${a.why}\n`;
     if (a.canonicalSourceUrl) md += `原始/更权威来源：${a.canonicalSourceUrl}\n`;
