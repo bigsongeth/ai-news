@@ -158,6 +158,18 @@ function buildHighlights(items: EditedItem[], signals?: Signals) {
   return out.slice(0, 5);
 }
 
+function isGarbageSummary(a: EditedItem) {
+  const s = (a.summaryZh || '').trim();
+  const why = (a.why || '').trim();
+  const kws = (a.keywords || []).map(x => String(x).trim()).filter(Boolean);
+  const hasTemplateLead = s.startsWith('这篇文章主要讨论') || s.startsWith('这是一篇基于标题、描述和来源线索整理出的保守版总结');
+  const hasTemplateBody = s.includes('帮助判断一个具体趋势、产品动作或行业情绪') || s.includes('因此阅读时应把它看作高密度导读') || s.includes('如果内容涉及产品发布、模型能力、平台策略或生态合作');
+  const genericWhy = why === '帮助快速判断这条信息与 AI 主线、产品变化或工程实践的关系。';
+  const weakOther = (a.category === '其他' || a.category === '工程') && (a.score || 0) <= 6.2 && (a.dims?.relevance || 0) <= 2;
+  const fakeAiKw = kws.length <= 2 && kws.every(k => ['AI', '资讯', '科技', '观点', '工程'].includes(k));
+  return (hasTemplateLead && hasTemplateBody) || genericWhy || (weakOther && fakeAiKw);
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   const runDir = args.runDir;
@@ -190,7 +202,8 @@ async function main() {
     return String(b.publishedAt).localeCompare(String(a.publishedAt));
   });
 
-  const picked = items.slice(0, topN);
+  const filteredItems = items.filter(x => !isGarbageSummary(x));
+  const picked = filteredItems.slice(0, topN);
   const { categoryStats, keywordTop } = computeStats(picked);
   const highlights = buildHighlights(picked, signals);
 
