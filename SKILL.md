@@ -177,6 +177,8 @@ description: >
   - 给接手技能的龙虾看的安装与配置说明
 - `references/workflow.md`
   - 给维护者看的 workflow 与排障说明
+- `references/publish.md`
+  - 给准备发 GitHub 的人看的发布前 checklist
 - `output/<runId>/...`
   - 每次运行的中间产物与结果文件
 

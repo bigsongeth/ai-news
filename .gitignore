@@ -1,1 +1,3 @@
 output/
+# local / transitional helper script; not part of the public skill surface
+scripts/openclaw_make_edited.ts
