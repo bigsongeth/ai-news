@@ -173,6 +173,10 @@ description: >
   - 过滤、去重、分片，输出 `output/<runId>/plan.json`
 - `scripts/openclaw_render_v25.ts`
   - 读取分片编辑结果，渲染最终日报
+- `references/setup.md`
+  - 给接手技能的龙虾看的安装与配置说明
+- `references/workflow.md`
+  - 给维护者看的 workflow 与排障说明
 - `output/<runId>/...`
   - 每次运行的中间产物与结果文件
 
