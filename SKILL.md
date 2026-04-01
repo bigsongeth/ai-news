@@ -1,93 +1,345 @@
 ---
 name: ai-daily-digest
 description: >
-  Generate an AI/tech daily digest from RSS candidates. Use when the user asks to run the digest,
-  update the digest pipeline, inspect digest outputs, or operate the scheduled AI news workflow.
-  Supports staged pipeline work: fetch candidates, verify sources, extract article bodies, edit article cards,
-  and render a Feishu-friendly digest.
+  Generate and operate a reusable AI/tech daily digest workflow from RSS and web articles.
+  Use when the user wants to run an AI news digest, inspect or improve digest outputs,
+  schedule recurring AI news delivery, or troubleshoot the end-to-end news pipeline.
+  Supports staged execution: fetch candidates, verify sources, extract article bodies,
+  edit article cards, and render a chat-friendly final digest.
 ---
 
 # AI Daily Digest
 
-本 skill 是当前本地维护版的 AI 日报流水线说明。目标是让不同能力的模型都能按同一套规范稳定完成：
-- 抓取候选 RSS 文章
-- 做来源核验
-- 提取正文
-- 生成展开版中文总结
-- 输出适配飞书/聊天的日报
+这是一个可分享、可复用的 **AI / Tech 日报技能**。
 
-## 什么时候用
+它的目标不是“随便抓几条 RSS 然后拼起来”，而是把 **候选抓取 → 来源核验 → 正文提取 → 中文编辑 → 最终排版 → 定时投递** 做成一条稳定的工作流，让别的 OpenClaw / 龙虾也能快速装上、跑起来、改起来。
 
-当用户提到以下需求时使用：
-- 跑 AI 日报 / tech digest / RSS digest
-- 看日报产物
-- 调整 cron 日报流程
-- 排查日报为什么抓取失败 / 摘要变差 / 产出异常
-- 优化提取、编辑、排序、飞书投递
+适用对象有两类：
 
-## 目录结构
+- **龙虾本人**：需要知道什么时候触发、怎么执行、出错先看哪层
+- **龙虾的主人**：需要知道这个技能能做什么、为什么值得装、需要准备哪些账号与配置
 
-- `scripts/openclaw_fetch.ts`：抓取 RSS 候选，输出 `output/candidates.json`
-- `scripts/openclaw_plan.ts`：过滤、去重、分片，输出 `output/<runId>/plan.json`
-- `scripts/openclaw_render_v25.ts`：读取分片编辑结果，渲染最终日报
-- `output/<runId>/...`：每次运行的中间产物
+---
 
-## 当前推荐流水线
+## 1. 这个技能能干嘛
 
-1. **fetch**
-   - 运行 `scripts/openclaw_fetch.ts`
-   - 产出 `output/candidates.json`
+这个技能可以把过去一段时间（通常是过去 24 小时）的 AI / Tech 文章整理成一份可读的中文日报。
 
-2. **plan**
-   - 运行 `scripts/openclaw_plan.ts`
-   - 产出：
-     - `output/<runId>/plan.json`
-     - `chunk-<n>.input.json`
+它覆盖的能力包括：
 
-3. **scout / verifier / extractor / editor**
-   - 可由主 agent + sub-agents 完成
-   - 推荐中间文件：
-     - `signals.json`
-     - `validated_sources.json`
-     - `chunk-<n>.extracted.json`
-     - `chunk-<n>.edited.json`
+- 抓取 RSS 候选文章
+- 过滤、去重、分片
+- 核验文章来源，尽量给出更原始、更权威的链接
+- 抽取正文，而不是只依赖 RSS 标题和 description
+- 生成中文展开版摘要，而不是一行标题改写
+- 给每篇内容做分类、关键词、推荐理由、相关性/质量/时效评分
+- 生成适合聊天场景投递的最终日报
+- 通过 cron 定时运行，自动发到飞书 / 聊天渠道
+- 排查“没抓到 / 抓乱了 / 提取失败 / 摘要变差 / 没发出去”等问题
 
-4. **render**
-   - 运行 `scripts/openclaw_render_v25.ts`
-   - 输出最终日报
+一句话概括：
 
-## 输出约束
+> 它不是一个“新闻列表生成器”，而是一条 **面向 AI 新闻消费场景的日报生产流水线**。
 
-### Extractor
-Extractor 不能只说“提取失败”，必须记录：
+---
+
+## 2. 核心价值
+
+### 2.1 它解决的不是“有没有新闻”，而是“怎么把新闻变得可读”
+
+很多新闻工作流停在：
+- 抓 RSS
+- 调大模型总结
+- 发消息
+
+这会导致几个典型问题：
+
+- 标题党、转载文、引语帖混进来
+- 没读正文，只围绕标题瞎总结
+- 没区分原始来源和二手解读
+- 所有摘要都长得像一个模板
+- 结果看起来像“信息很多”，实际上可读性很差
+
+这个技能的核心价值在于，它把问题拆成多个阶段，让质量控制发生在摘要之前，而不是把所有问题都甩给最后一步的大模型。
+
+### 2.2 它适合做“可运营的日报”，不是一次性 demo
+
+它的设计目标包括：
+
+- **可定时运行**：适合每天固定时间输出
+- **可回看中间产物**：出问题时知道是哪一层坏了
+- **可替换投递端**：飞书、聊天消息都能接
+- **可替换模型**：不把流程和某个单一模型死绑
+- **可扩展**：后面可以接更多源、更多分类、更复杂的排序逻辑
+
+### 2.3 它天然适合主任务 + 子任务编排
+
+这条 workflow 不是“一个 agent 从头做到底”的笨重模式，而是：
+
+- 主任务负责调度和最终收口
+- 子任务负责 Scout / Verifier / Extractor / Editor 这些重活
+
+这样做的好处是：
+
+- 更容易并行
+- 更容易定位问题
+- 更容易替换某一层实现
+- 最终输出责任仍然清晰，避免多个 agent 抢着说话
+
+---
+
+## 3. 什么时候用
+
+当用户提到以下需求时触发：
+
+- 跑 AI 日报 / AI news / tech digest / RSS digest
+- 看今天的 AI 新闻结果
+- 调整 AI 日报 cron
+- 检查日报为什么没发出去
+- 排查正文提取失败 / 摘要质量下降 / Top 0 / delivery failed
+- 优化来源筛选、摘要格式、最终排版
+- 把这套日报工作流迁移到另一个龙虾 / 另一个工作区 / 另一个群
+
+---
+
+## 4. 给龙虾主人的说明：装这个技能前要准备什么
+
+这部分是给“龙虾的主人”看的。
+
+### 4.1 必要条件
+
+至少需要：
+
+- 一个能运行 OpenClaw 的环境
+- 能访问 RSS 与网页正文的网络环境
+- 一个可写工作目录
+- 至少一个可用模型提供方
+
+### 4.2 如果你想要“自动投递”，还要准备消息渠道
+
+当前这条流水线最常见的投递目标是：
+
+- 飞书聊天
+- 其他 OpenClaw 已接入的聊天渠道
+
+如果要让日报“自动发出去”，主人需要先把对应渠道在 OpenClaw 里配好。
+
+### 4.3 推荐准备项
+
+- 稳定可用的主模型
+- 可以读网页正文的工具链（如 `web_fetch` / `browser`）
+- 一个明确的投递目标（例如飞书 chat id）
+- 一个固定的 cron 时间（例如每天早上 8 点）
+
+---
+
+## 5. 给别的龙虾的安装/接管引导词
+
+如果另一个龙虾刚接手这套技能，可以直接按下面的引导词开始。
+
+### 5.1 初次接管时建议这样问主人
+
+你可以直接对主人说：
+
+> 我可以帮你把 AI 日报技能接起来。为了完成安装，我需要你确认 4 件事：
+> 1. 日报要发到哪里？（飞书 / 其他渠道，具体目标是什么）
+> 2. 你希望多久跑一次？（例如每天 08:00）
+> 3. 你希望覆盖哪些内容？（AI、编程、产品、创业、评论……）
+> 4. 你现在 OpenClaw 里已经配置好哪些消息渠道和模型？
+
+### 5.2 如果主人不知道自己配没配好账号，可以这样引导
+
+> 为了让日报自动发出去，我需要确认你的 OpenClaw 已经连上消息渠道和模型。你可以先告诉我：
+> - 你准备发到哪个聊天工具
+> - 这个聊天工具在 OpenClaw 里是否已经可用
+> - 你现在默认使用哪个模型
+> 如果你不确定，我可以先按“手动跑一次日报，不自动投递”的方式帮你验证流程。
+
+### 5.3 如果主人只想先试跑，不想先折腾 cron
+
+> 我可以先不配定时任务，直接手动跑一版今日 AI 日报给你看。等你确认效果满意，再把它变成每天自动发送。
+
+这一步非常重要，因为很多主人一开始并不缺“能跑的自动化”，而是缺“能看懂、愿意长期看”的日报体验。
+
+---
+
+## 6. 目录结构
+
+当前技能目录结构里，最重要的是这些文件：
+
+- `scripts/openclaw_fetch.ts`
+  - 抓取 RSS 候选，输出 `output/candidates.json`
+- `scripts/openclaw_plan.ts`
+  - 过滤、去重、分片，输出 `output/<runId>/plan.json`
+- `scripts/openclaw_render_v25.ts`
+  - 读取分片编辑结果，渲染最终日报
+- `output/<runId>/...`
+  - 每次运行的中间产物与结果文件
+
+如果后续要公开分享，建议把输出目录视为运行产物，而不是技能说明的一部分。
+
+---
+
+## 7. 标准工作流
+
+这是这条技能推荐给别的龙虾使用的标准流程。
+
+### 阶段 1：fetch
+
+目标：从 RSS / 源站拉到候选文章。
+
+产物：
+
+- `output/candidates.json`
+
+### 阶段 2：plan
+
+目标：
+
+- 过滤候选
+- 去重
+- 分 chunk
+- 为后续并行处理准备输入
+
+产物：
+
+- `output/<runId>/plan.json`
+- `chunk-<n>.input.json`
+
+### 阶段 3：Scout
+
+目标：
+
+- 看候选里哪些值得进入日报
+- 形成初步信号与优先级判断
+
+产物：
+
+- `signals.json`
+
+### 阶段 4：Verifier
+
+目标：
+
+- 识别更原始、更官方、更权威的来源
+- 减少“二手转述冒充一手信息”
+
+产物：
+
+- `validated_sources.json`
+
+### 阶段 5：Extractor
+
+目标：
+
+- 尽量拿到正文，而不是只拿标题和简介
+- 对失败路径留下明确记录
+
+产物：
+
+- `chunk-<n>.extracted.json`
+
+### 阶段 6：Editor
+
+目标：
+
+- 把正文内容转成中文展开版摘要
+- 补充分类、关键词、推荐理由、评分
+- 保证不是模板化废话，也不是原文拼接
+
+产物：
+
+- `chunk-<n>.edited.json`
+
+### 阶段 7：Render
+
+目标：
+
+- 把编辑结果拼成最终日报
+- 输出适合聊天投递的格式
+
+产物：
+
+- `final.txt` / 最终 digest 文本
+
+---
+
+## 8. 子任务编排方式
+
+这条技能非常适合用 **主任务 + 子任务** 的方式运行。
+
+推荐分工：
+
+- **主任务**
+  - fetch
+  - plan
+  - 等待所有中间文件
+  - render
+  - 输出最终日报 / 明确错误报告
+
+- **子任务**
+  - Scout
+  - Verifier
+  - Extractor（可按 chunk 并行）
+  - Editor（可按 chunk 并行）
+
+### 一个重要原则
+
+- 子任务只负责产出文件，不负责对外发最终日报
+- 主任务负责最终收口
+
+这样能避免：
+
+- 多个子任务抢着发消息
+- 最终结果不完整
+- 中间产物和最终产物混在一起
+
+---
+
+## 9. 输出质量约束
+
+### 9.1 Extractor 约束
+
+Extractor 不能只说“提取失败”，至少要记录：
+
 - `attempts`
 - `failure_stage`
 - `failure_reason`
 - `content_chars`
 
 如果失败，必须能回答：
+
 - 试过哪些步骤
 - 卡在哪一步
 - 为什么失败
 
-### Editor
-Editor 输出的 `summaryZh` 必须是：
-- 展开版中文总结
-- 不是正文摘抄
-- 不是一句话短摘要
-- 默认覆盖：主题、关键点、观点/结论、意义、边界（至少其中 3 项）
+### 9.2 Editor 约束
 
-如果正文未完整拿到：
+Editor 输出的 `summaryZh` 必须是：
+
+- 中文展开总结
+- 不是一句话短摘要
+- 不是标题改写
+- 不是正文摘抄
+
+默认至少覆盖以下维度中的 3 项：
+
+- 主题
+- 关键点
+- 观点 / 结论
+- 意义
+- 边界 / 保守点
+
+如果正文不完整：
+
 - 必须明确保守
 - 不允许伪装成读过全文
 
-## 最终日报格式规范（重要）
+---
 
-这是当前**强约束格式**。低能力模型也必须照这个格式输出，不要自由发挥。
+## 10. 最终日报格式规范（强约束）
 
-### 整体结构
-
-最终日报按这个顺序输出：
+最终日报按下面顺序输出：
 
 1. 标题
 2. 顶部概览信息
@@ -95,9 +347,7 @@ Editor 输出的 `summaryZh` 必须是：
 4. `## 🏆 今日必读`
 5. `## 📊 数据概览`
 
-### 顶部概览信息格式
-
-标题下方先写 1 行或 2 行概览，例如：
+### 顶部概览信息示例
 
 ```md
 # 🦞 AI Daily Digest｜过去24小时（Top 15）
@@ -106,14 +356,7 @@ Editor 输出的 `summaryZh` 必须是：
 > 失败源（5）：idiallo.com、jeffgeerling.com、micahflee.com、rachelbythebay.com、tedunangst.com
 ```
 
-规则：
-- 顶部概览信息可以用引用块 `>`
-- 这里允许 1-2 行
-- 不要在这里写大段说明
-
-### 每篇条目的固定格式
-
-每篇条目统一使用下面结构：
+### 单篇条目格式
 
 ```md
 ### [中文标题](URL)
@@ -124,72 +367,15 @@ Editor 输出的 `summaryZh` 必须是：
 关键词：`词1` `词2` `词3`
 ```
 
-### 强制规则
+### 强规则
 
-- **只有摘要**使用引用块 `>`
-- **来源 / 时间 / 类别 / 评分 / 推荐理由 / 原始来源 / 关键词** 一律用普通正文
+- 只有摘要用引用块 `>`
+- 元信息不用表格
 - 不要把整条内容都写成 blockquote
-- 不要混用伪列表、奇怪缩进、表格
+- 不要混用奇怪缩进或伪列表
 - 不要把元信息塞进摘要里
 
-### 元信息行格式
-
-元信息单独一行，格式固定为：
-
-```md
-来源｜时间｜类别｜评分
-```
-
-示例：
-
-```md
-simonwillison.net｜2026-03-18 03:39｜AI/ML｜9.4（相关9/质量8/时效9）
-```
-
-规则：
-- 用全角竖线样式 `｜`
-- 时间放在来源后面
-- 类别放在时间后面
-- 评分最后
-- 不要把“推荐理由”塞进这行
-
-### 摘要格式
-
-摘要必须是：
-- 展开版中文总结
-- 6-10 句为主
-- 有信息密度，但不注水
-- 有结构，不是正文拼接
-
-摘要内容建议覆盖：
-- 文章在讲什么
-- 核心事实/论点/例子是什么
-- 为什么重要
-- 哪些地方仍需保守
-
-如果正文不完整：
-- 必须明确这是保守总结
-- 不允许伪装成看过全文
-
-### 推荐理由 / 原始来源 / 关键词
-
-这三项都单独成行：
-
-```md
-推荐理由：这是过去24小时里最明确的模型发布线索之一。
-原始/更权威来源：https://openai.com/index/introducing-gpt-5-4-mini-and-nano/
-关键词：`OpenAI` `GPT-5.4` `mini` `nano`
-```
-
-规则：
-- `推荐理由：` 单独一行
-- `原始/更权威来源：` 单独一行（如果有）
-- `关键词：` 后面用行内 code tag
-- 不要把这些内容放进引用块
-
 ### 今日看点格式
-
-`## 📝 今日看点` 下使用普通 bullet list：
 
 ```md
 ## 📝 今日看点
@@ -198,11 +384,6 @@ simonwillison.net｜2026-03-18 03:39｜AI/ML｜9.4（相关9/质量8/时效9）
 - 正文提取结果：成功 X 篇，失败 Y 篇。
 - 主要提取失败原因：blocked（2）、too_short（1）。
 ```
-
-规则：
-- 今日看点用 `- ` 列表
-- 这里不要写成每条一大段散文
-- 如果提取失败较多，要明确报统计和原因
 
 ### 数据概览格式
 
@@ -215,40 +396,119 @@ simonwillison.net｜2026-03-18 03:39｜AI/ML｜9.4（相关9/质量8/时效9）
 - 工程：3
 - 观点/杂谈：2
 
-**高频关键词Top10**
+**高频关键词 Top10**
 
 - OpenAI（3）
 - Agents（2）
 ```
 
-规则：
-- 不用 Markdown 表格
-- 不用 Mermaid
-- 直接 bullet list，保证各平台稳定
+---
 
-## 运行与排查
+## 11. 手动运行方式
 
-### 手动跑 cron
-如果日报由 cron 托管，可用 OpenClaw CLI 手动触发对应 job：
+### 手动跑一次 cron
+
+如果日报已经挂到 cron，可直接运行：
+
 - `openclaw cron run <job-id>`
 
 ### 看最近产物
+
 优先查看：
+
 - `output/<latest-run>/signals.json`
 - `output/<latest-run>/validated_sources.json`
 - `output/<latest-run>/chunk-*.extracted.json`
 - `output/<latest-run>/chunk-*.edited.json`
-- `output/<latest-run>/final.txt` 或最终 digest 文件
+- `output/<latest-run>/final.txt`
 
-### 出现问题时先看哪层
-- 没候选：先看 fetch
-- 来源乱：先看 verifier
-- 正文为空：先看 extractor
-- 摘要像摘抄：先看 editor
-- 飞书排版不对：先看 renderer
+---
 
-## 注意
+## 12. 排障顺序
 
-- 这个 skill 以当前本地流水线为准，不再以旧版 Gemini 交互流程为主。
-- 对 OpenClaw 运行来说，`SKILL.md + scripts/` 才是主入口。
-- 输出格式以本文件中的“最终日报格式规范”为准。
+当日报出问题时，建议别的龙虾按这个顺序查：
+
+### 没候选
+
+先看：
+
+- fetch
+- RSS 源可用性
+- `candidates.json`
+
+### 来源很乱 / 原始来源不对
+
+先看：
+
+- verifier
+- `validated_sources.json`
+
+### 正文为空 / 内容很短 / 像导航页
+
+先看：
+
+- extractor
+- `failure_reason`
+- `content_chars`
+
+### 摘要很差 / 像模板 / Top 0
+
+先看：
+
+- editor
+- `summaryZh`
+- `score`
+- `confidence`
+
+### 发不出去
+
+先看：
+
+- cron run 状态
+- delivery 配置
+- 目标聊天渠道是否可用
+
+---
+
+## 13. 对外分享时建议讲给主人的话
+
+如果要把这个技能放到 GitHub 上，建议把它介绍成：
+
+> 这是一个面向 OpenClaw / 龙虾生态的 AI 日报技能。
+> 它把“抓新闻、读正文、写中文摘要、整理成可读日报、定时发出去”做成了一条可复用工作流。
+> 适合想要稳定获取 AI / Tech 动态、又不想每天自己翻几十个 RSS 和网页的人。
+
+你也可以更直白一点：
+
+> 这个技能的价值，不是让 AI 帮你“多看一点新闻”，而是帮你把真正值得看的内容筛出来、讲清楚、按时送到你面前。
+
+---
+
+## 14. 当前版本边界
+
+这个技能当前版本的边界包括：
+
+- 以本地维护版流程为准
+- 重点优化的是 AI / Tech 日报场景
+- 当前默认输出格式更偏飞书 / 聊天消息兼容
+- 并不是一个通用任意主题新闻引擎
+
+如果要继续演进，最适合扩展的方向是：
+
+- 可配置 RSS 源集合
+- 可配置主题偏好
+- 可配置投递目标
+- 可配置 TopN 和时间窗口
+- 更稳定的来源评分 / 排序逻辑
+
+---
+
+## 15. 注意
+
+- 对 OpenClaw 来说，`SKILL.md + scripts/` 才是主入口
+- 这条技能的重点不是“讲概念”，而是“交付一份真的可读的日报”
+- 如果要公开分享，优先让别的龙虾能在 10 分钟内理解：
+  - 它能干嘛
+  - 为什么值得装
+  - 需要准备什么
+  - 出问题先看哪里
